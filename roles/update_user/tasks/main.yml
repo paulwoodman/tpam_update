@@ -1,0 +1,65 @@
+---
+- name: credential name
+  debug:
+    var: item.name
+
+- name: API call for credential
+  uri:
+    url: "https://{{ansible_nodename}}/api/v2/credentials/?name={{item.name}}"
+    method: GET
+    user: "{{ tower_api_user }}" 
+    password: "{{ tower_api_pass }}" 
+    validate_certs: False
+    force_basic_auth: yes
+  register: api_output
+
+- name: get username from credential
+  set_fact:
+    cred_user: "{{ api_output.json.results[0].inputs.username }}"
+
+- name: get id of credential
+  set_fact:
+    cred_id: "{{ api_output.json.results[0].id }}"
+
+- name: credential id
+  debug:
+    var: cred_id
+
+- name: display username from credential
+  debug:
+    var: cred_user
+
+- name: copy key to tmp
+  copy:
+   src: tpamCli.key
+   dest: /tmp/tpamCli.key
+   mode: 0600
+
+- name: get new password
+  shell: ssh -i /tmp/tpamCli.key noa_cli@passwords.schwab.com retrieve --systemname usdomain --accountname {{ cred_user }}
+  register: new_password
+
+- name: remove key from host
+  file:
+    path: /tmp/tpamCli.key
+    state: absent
+
+- name: update credential password
+  uri:
+    url: "https://{{ansible_nodename}}/api/v2/credentials/{{cred_id}}/"
+    method: PUT
+    headers:
+      Content-Type: "application/json"
+    body_format: json
+    body: {
+            "name": "{{ item.name }}",
+            "credential_type": 1,
+            "inputs": {
+               "username": "{{ cred_user }}",
+               "password": "{{ new_password.stdout }}"
+            }
+           }
+    user: "{{ tower_api_user }}"
+    password: "{{ tower_api_pass }}"
+    validate_certs: False
+    force_basic_auth: yes
